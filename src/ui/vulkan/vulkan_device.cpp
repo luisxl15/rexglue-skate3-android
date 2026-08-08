@@ -36,8 +36,8 @@ REXCVAR_DEFINE_BOOL(vulkan_require_vertex_pipeline_stores_and_atomics, true, "UI
                     "required for Vulkan GPU emulation")
     .lifecycle(rex::cvar::Lifecycle::kInitOnly);
 REXCVAR_DEFINE_BOOL(vulkan_require_geometry_shader,
-#if REX_PLATFORM_MAC
-                    false,
+#if REX_PLATFORM_MAC || REX_PLATFORM_ANDROID
+                    false,  // MoltenVK and mobile Mali GPUs lack geometryShader.
 #else
                     true,
 #endif
@@ -45,7 +45,13 @@ REXCVAR_DEFINE_BOOL(vulkan_require_geometry_shader,
                     "Require geometryShader support for Vulkan GPU emulation (disable to allow "
                     "fallback primitive emulation paths)")
     .lifecycle(rex::cvar::Lifecycle::kInitOnly);
-REXCVAR_DEFINE_BOOL(vulkan_require_fill_mode_non_solid, true, "UI/Vulkan",
+REXCVAR_DEFINE_BOOL(vulkan_require_fill_mode_non_solid,
+#if REX_PLATFORM_ANDROID
+                    false,  // Many mobile GPUs (e.g. Mali-G52) lack fillModeNonSolid.
+#else
+                    true,
+#endif
+                    "UI/Vulkan",
                     "Require fillModeNonSolid support for Vulkan GPU emulation (disable to "
                     "allow fallback to solid fill for line/point polygon modes)")
     .lifecycle(rex::cvar::Lifecycle::kInitOnly);
@@ -126,11 +132,13 @@ std::unique_ptr<VulkanDevice> VulkanDevice::CreateIfSupported(
       return nullptr;
     }
     if (!supported_features.vertexPipelineStoresAndAtomics) {
+      // Some mobile GPUs (e.g. Mali-G52) lack this. Instead of rejecting the
+      // device outright, continue: vertex-shader memexport draws are skipped in
+      // the command processor (may cause visual glitches) but the rest renders.
       REXLOG_WARN(
-          "Vulkan device '{}' doesn't support vertexPipelineStoresAndAtomics, which "
-          "is required for Vulkan GPU emulation parity",
+          "Vulkan device '{}' doesn't support vertexPipelineStoresAndAtomics; "
+          "vertex-shader memexport will be disabled (may cause visual glitches)",
           properties.deviceName);
-      return nullptr;
     }
     if (REXCVAR_GET(vulkan_require_geometry_shader) && !supported_features.geometryShader) {
       REXLOG_WARN(

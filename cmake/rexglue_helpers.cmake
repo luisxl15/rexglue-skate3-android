@@ -22,7 +22,7 @@ function(rexglue_apply_target_settings target_name)
         endif()
     endif()
 
-    if(UNIX AND NOT APPLE)
+    if(UNIX AND NOT APPLE AND NOT ANDROID)
         find_package(PkgConfig REQUIRED)
         pkg_check_modules(GTK3 REQUIRED gtk+-3.0)
         target_include_directories(${target_name} PRIVATE ${GTK3_INCLUDE_DIRS})
@@ -35,6 +35,8 @@ function(rexglue_apply_target_settings target_name)
             target_compile_options(${target_name} PRIVATE -march=armv8-a)
         endif()
     endif()
+    # Android: no GTK3/X11 desktop stack; the NDK toolchain sets the arch and
+    # code model. Nothing extra needed here.
 
     if(NOT MSVC AND NOT APPLE)
         if(_rexglue_target_processor MATCHES "x86_64|AMD64")
@@ -59,6 +61,11 @@ function(rexglue_configure_target target_name)
     if(WIN32)
         target_sources(${target_name} PRIVATE
             ${REXGLUE_SHARE_DIR}/windowed_app_main_win.cpp)
+    elseif(ANDROID)
+        # Android is library mode (XE_UI_WINDOWED_APPS_IN_LIBRARY): the app
+        # registers itself via REX_DEFINE_APP and the entry point (JNI / SDL
+        # activity bridge) is supplied by the app shell, so there is no
+        # windowed_app_main_*.cpp with a GetWindowedAppCreator() here.
     elseif(APPLE)
         target_sources(${target_name} PRIVATE
             ${REXGLUE_SHARE_DIR}/windowed_app_main_sdl.cpp)

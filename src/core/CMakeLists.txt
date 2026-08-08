@@ -63,6 +63,10 @@ elseif(UNIX)
         system_posix.cpp
         threading_posix.cpp
     )
+    if(ANDROID)
+        # Android-only filesystem hooks (content:// URI access via JNI).
+        target_sources(rexcore PRIVATE filesystem_android.cpp)
+    endif()
 endif()
 
 target_include_directories(rexcore PUBLIC
@@ -77,9 +81,17 @@ target_include_directories(rexcore PRIVATE
 )
 
 if(UNIX)
-    target_link_libraries(rexcore PRIVATE pthread dl)
-    if(NOT APPLE)
-        target_link_libraries(rexcore PRIVATE rt)
+    if(ANDROID)
+        # Bionic folds pthread and rt into libc; there are no -lpthread / -lrt
+        # to link against. libucontext provides the fiber context switch that
+        # Bionic's missing getcontext/makecontext/swapcontext would.
+        target_link_libraries(rexcore PRIVATE dl)
+        target_link_libraries(rexcore PUBLIC libucontext)
+    else()
+        target_link_libraries(rexcore PRIVATE pthread dl)
+        if(NOT APPLE)
+            target_link_libraries(rexcore PRIVATE rt)
+        endif()
     endif()
 elseif(WIN32)
     target_link_libraries(rexcore PUBLIC ws2_32)

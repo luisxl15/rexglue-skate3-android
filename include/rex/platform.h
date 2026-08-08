@@ -102,6 +102,16 @@
 #include <bit>
 #include <cstdint>
 
+#if REX_PLATFORM_ANDROID
+#include <android/api-level.h>
+namespace rex {
+// Runtime device API level (e.g. 26 for Android 8.0 Oreo). Bionic exposes this
+// via android_get_device_api_level() since API 24. Used to gate features such
+// as ASharedMemory (API 26+).
+inline int GetAndroidApiLevel() { return android_get_device_api_level(); }
+}  // namespace rex
+#endif  // REX_PLATFORM_ANDROID
+
 //=============================================================================
 // Compiler Polyfills
 //=============================================================================

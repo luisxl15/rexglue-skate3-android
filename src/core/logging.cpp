@@ -28,6 +28,9 @@
 
 #if REX_PLATFORM_WIN32
 #include <spdlog/sinks/msvc_sink.h>
+#elif REX_PLATFORM_ANDROID
+#include <spdlog/sinks/android_sink.h>
+#include <spdlog/sinks/stdout_sinks.h>
 #else
 #include <spdlog/sinks/stdout_sinks.h>
 #endif
@@ -173,6 +176,8 @@ void InitLoggingEarly() {
 
 #if REX_PLATFORM_WIN32
   auto sink = std::make_shared<spdlog::sinks::msvc_sink_mt>();
+#elif REX_PLATFORM_ANDROID
+  auto sink = std::make_shared<spdlog::sinks::android_sink_mt>("skate3");
 #else
   auto sink = std::make_shared<spdlog::sinks::stdout_sink_mt>();
 #endif
@@ -221,7 +226,9 @@ void InitLogging(const LogConfig& config) {
   //     apps and does not conflict with the stdout console sink, so keep it.
   //   Non-Windows: drop the early stdout sink unconditionally so file-only
   //     configs don't leak to stdout and console configs don't duplicate.
-#if !REX_PLATFORM_WIN32
+  // On Android keep the early android (logcat) sink as the persistent debug
+  // channel, like the Windows msvc_sink, so runtime logs always reach logcat.
+#if !REX_PLATFORM_WIN32 && !REX_PLATFORM_ANDROID
   if (g_early_sink) {
     for (auto& entry : g_registry) {
       if (entry.logger)

@@ -886,7 +886,14 @@ void XThread::SetActiveCpu(uint8_t cpu_index) {
       thread_->set_affinity_mask(uint64_t(1) << cpu_index);
     }
   } else {
-    REXSYS_WARN("Too few processor cores - scheduling will be wonky");
+    // Once per process: this runs on every guest thread reschedule, so on a
+    // 4-core phone/emulator it emitted tens of thousands of identical lines
+    // per minute - enough to evict the whole boot log from logcat's ring
+    // buffer and burn CPU on a device that is already short of it.
+    static std::atomic<bool> s_warned{false};
+    if (!s_warned.exchange(true, std::memory_order_relaxed)) {
+      REXSYS_WARN("Too few processor cores - scheduling will be wonky");
+    }
   }
 }
 

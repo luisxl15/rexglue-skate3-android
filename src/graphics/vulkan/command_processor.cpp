@@ -1244,10 +1244,11 @@ bool VulkanCommandProcessor::SetupContext() {
     return false;
   }
   if (!device_properties.vertexPipelineStoresAndAtomics) {
-    REXGPU_ERROR(
-        "Vulkan vertexPipelineStoresAndAtomics is required for GPU emulation and "
-        "D3D12 parity, but unsupported by the selected device");
-    return false;
+    // Degrade instead of failing: vertex-shader memexport draws are skipped in
+    // the draw path when this feature is missing (e.g. Mali-G52).
+    REXGPU_WARN(
+        "Vulkan vertexPipelineStoresAndAtomics unsupported; vertex-shader "
+        "memexport draws will be skipped (may cause visual glitches)");
   }
   if (!device_properties.geometryShader) {
     if (REXCVAR_GET(vulkan_require_geometry_shader)) {
@@ -4180,12 +4181,19 @@ bool VulkanCommandProcessor::IssueDraw(xenos::PrimitiveType prim_type, uint32_t 
   bool memexport_used_vertex = vertex_shader->memexport_eM_written() != 0;
   if (memexport_used_vertex) {
     if (!device_properties.vertexPipelineStoresAndAtomics) {
-      REXGPU_ERROR(
-          "Vertex shader memexport draw encountered without "
-          "vertexPipelineStoresAndAtomics support");
-      return false;
+      // Device lacks the feature (e.g. Mali-G52): skip the vertex memexport so
+      // the draw still renders (its exported memory just won't be written).
+      static bool memexport_skip_warned = false;
+      if (!memexport_skip_warned) {
+        REXGPU_WARN(
+            "Skipping vertex-shader memexport draws (device lacks "
+            "vertexPipelineStoresAndAtomics)");
+        memexport_skip_warned = true;
+      }
+      memexport_used_vertex = false;
+    } else {
+      draw_util::AddMemExportRanges(regs, *vertex_shader, memexport_ranges_);
     }
-    draw_util::AddMemExportRanges(regs, *vertex_shader, memexport_ranges_);
   }
 
   // Pixel shader analysis.

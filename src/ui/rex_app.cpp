@@ -22,6 +22,7 @@
 #include <rex/ui/overlay/console_overlay.h>
 #include <rex/ui/overlay/debug_overlay.h>
 #include <rex/ui/overlay/fps_overlay.h>
+#include <rex/ui/overlay/touch_controls_overlay.h>
 #include <rex/ui/overlay/settings_overlay.h>
 #include <rex/graphics/graphics_system.h>
 #include <rex/graphics/native_rhi.h>
@@ -43,7 +44,10 @@
 #include <rex/version.h>
 
 #if REX_PLATFORM_LINUX
+#if !REX_PLATFORM_ANDROID
+// Bionic has no gnu/libc-version.h (glibc-only diagnostic).
 #include <gnu/libc-version.h>
+#endif
 #include <sys/utsname.h>
 #endif
 
@@ -162,7 +166,9 @@ void LogLinuxRuntimeDiagnostics() {
   if (uname(&uts) == 0) {
     REXLOG_INFO("  Kernel: {} {} {}", uts.sysname, uts.release, uts.machine);
   }
+#if !REX_PLATFORM_ANDROID
   REXLOG_INFO("  glibc: {}", gnu_get_libc_version());
+#endif
 
 #if defined(__clang__)
   REXLOG_INFO("  Compiler: clang {}", __clang_version__);
@@ -417,7 +423,13 @@ bool ReXApp::SetupEnvironment() {
                                         log_level_str, category_levels);
   if (log_file_cvar.empty()) {
     log_config.app_name = std::string(GetName());
+#if REX_PLATFORM_ANDROID
+    // exe_dir is the read-only /system/bin on Android; the entry point chdir's
+    // to app-private writable storage, so write logs relative to that.
+    log_config.log_dir = (std::filesystem::current_path() / "logs").string();
+#else
     log_config.log_dir = (exe_dir / "logs").string();
+#endif
   }
 
   rex::InitLogging(log_config);
@@ -667,6 +679,12 @@ bool ReXApp::SetupPresentation() {
         imgui_drawer_ = std::make_unique<rex::ui::ImGuiDrawer>(
             window_.get(), 64, [this](ImFontAtlas* atlas) { OnConfigureFonts(atlas); });
         imgui_drawer_->SetPresenterAndImmediateDrawer(presenter, immediate_drawer_.get());
+#if REX_PLATFORM_ANDROID
+        // On-screen touch controls: renders a virtual gamepad and drives an SDL
+        // virtual joystick that the normal SDL input driver picks up.
+        touch_controls_overlay_ =
+            std::make_unique<ui::TouchControlsOverlayDialog>(imgui_drawer_.get());
+#endif
         if (!frame_stats_provider_) {
           frame_stats_provider_ = [presenter]() {
             ui::Presenter::GuestFrameStats stats = presenter->GetGuestFrameStats();

@@ -236,6 +236,15 @@ class VulkanDevice {
   template <typename Object>
   void SetObjectName(const VkObjectType object_type, const Object object_handle,
                      const char* const object_name) const {
+#if defined(__ANDROID__)
+    // vkSetDebugUtilsObjectNameEXT crashes in emulator / ARM-translation Vulkan
+    // drivers (e.g. BlueStacks). Object naming is purely diagnostic (RenderDoc /
+    // validation labels), so skip it on Android.
+    (void)object_type;
+    (void)object_handle;
+    (void)object_name;
+    return;
+#else
     if (!vulkan_instance()->extensions().ext_EXT_debug_utils) {
       return;
     }
@@ -246,6 +255,7 @@ class VulkanDevice {
     object_name_info.objectHandle = (uint64_t)object_handle;
     object_name_info.pObjectName = object_name;
     vulkan_instance()->functions().vkSetDebugUtilsObjectNameEXT(device(), &object_name_info);
+#endif  // defined(__ANDROID__)
   }
 
   struct Queue {

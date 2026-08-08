@@ -30,6 +30,16 @@ set(REXUI_OVERLAY_SOURCES
     overlay/settings_overlay.cpp
 )
 
+# Touch controls overlay: Android only. Ele inclui headers do SDL3 direto, e o
+# rexui so recebe os include dirs do SDL3 nas plataformas que usam o backend de
+# janela SDL (Apple/Android). Adicionar incondicionalmente quebra o build de
+# desktop com "'SDL3/SDL_gamepad.h' file not found". O overlay tambem so e
+# instanciado sob REX_PLATFORM_ANDROID em rex_app.cpp, entao no desktop era
+# peso morto de qualquer forma.
+if(ANDROID)
+    list(APPEND REXUI_OVERLAY_SOURCES overlay/touch_controls_overlay.cpp)
+endif()
+
 # Vulkan UI backend
 set(REXUI_VULKAN_SOURCES
     vulkan/linked_type_descriptor_set_allocator.cpp
@@ -73,6 +83,16 @@ elseif(APPLE)
         surface_sdl.cpp
         window_sdl.cpp
         windowed_app_context_sdl.cpp
+    )
+elseif(ANDROID)
+    # Android windows through SDL (ANativeWindow), like the Apple path — not the
+    # desktop GTK3/X11 stack, which does not exist on Android. surface_android
+    # wraps the ANativeWindow for the Vulkan presenter (vkCreateAndroidSurfaceKHR).
+    set(REXUI_PLATFORM_SOURCES
+        surface_sdl.cpp
+        window_sdl.cpp
+        windowed_app_context_sdl.cpp
+        surface_android.cpp
     )
 else()
     set(REXUI_PLATFORM_SOURCES
@@ -156,6 +176,11 @@ if(WIN32)
     )
 elseif(APPLE)
     target_link_libraries(rexui PUBLIC SDL3::SDL3)
+elseif(ANDROID)
+    # Android windowing goes through ANativeWindow / SDL3 + the Vulkan
+    # Android surface; there is no GTK3/X11 desktop stack to link against.
+    # libandroid provides ANativeWindow_*, liblog provides __android_log_*.
+    target_link_libraries(rexui PUBLIC SDL3::SDL3 android log)
 else()
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(GTK3 REQUIRED gtk+-3.0)

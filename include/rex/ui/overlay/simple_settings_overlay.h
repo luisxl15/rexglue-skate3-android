@@ -132,6 +132,11 @@ class SimpleSettingsDialog final : public ImGuiDialog {
   int chord_index_ = 0;
   int input_backend_index_ = 0;
   std::string chord_custom_;
+  // On-screen touch button artwork (Android). Indices into the option lists
+  // the rows declare; the cvars behind them are strings naming an asset folder.
+  int touch_layout_index_ = 0;
+  int touch_fill_index_ = 1;
+  int touch_color_index_ = 1;
 
   // Navigation state.
   FocusZone zone_ = FocusZone::kRail;

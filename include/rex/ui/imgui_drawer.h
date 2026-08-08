@@ -63,6 +63,15 @@ class ImGuiDrawer : public WindowInputListener, public UIDrawer {
 
   Presenter* presenter() const { return presenter_; }
 
+  // The drawer a dialog must create its own textures through: an
+  // ImmediateTexture pointer IS the ImTextureID the draw lists take (the font
+  // atlas is bound exactly that way), so a dialog with artwork of its own can
+  // build textures directly instead of going through ImGui's texture requests.
+  // Null before a drawer is attached; it CHANGES when the presenter is
+  // recreated, and every texture made from the old one dies with it - so hold
+  // the pointer you built with and rebuild when it differs.
+  ImmediateDrawer* immediate_drawer() const { return immediate_drawer_; }
+
   // SetPresenter may be called from the destructor.
   void SetPresenter(Presenter* new_presenter);
   void SetImmediateDrawer(ImmediateDrawer* new_immediate_drawer);

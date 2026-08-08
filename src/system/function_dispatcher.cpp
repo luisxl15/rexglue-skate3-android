@@ -23,6 +23,16 @@
 #include <rex/system/function_dispatcher.h>
 #include <rex/system/thread_state.h>
 
+// Diagnostico de bring-up: por padrao uma chamada indireta para funcao nao
+// registrada e fatal, o que interrompe o boot na PRIMEIRA lacuna de descoberta
+// do codegen. Com isto ligado o dispatcher apenas registra a ocorrencia e
+// retorna, deixando o boot seguir para revelar as lacunas seguintes de uma vez.
+// O estado do guest fica incorreto (a chamada simplesmente nao acontece), entao
+// serve so para mapear o que falta - nunca para jogar.
+REXCVAR_DEFINE_BOOL(invalid_call_nonfatal, false, "Runtime",
+                    "Log and continue instead of aborting on a call to an "
+                    "unregistered guest function (bring-up diagnostics only)");
+
 namespace rex::runtime {
 
 namespace {
@@ -35,8 +45,30 @@ FunctionDispatcher* GetBoundFunctionDispatcher() {
 }  // namespace
 
 static void InvalidFunctionTrap(PPCContext& ctx, uint8_t* /*base*/) {
+  // The target alone is a dead end when it is 0 (a null function pointer the
+  // guest called through): it says nothing about WHERE. The link register still
+  // holds the return address, i.e. the instruction after the failed call, which
+  // maps back to a named function in the codegen manifest and identifies the
+  // caller. Registers r3-r5 usually carry the "this"/argument pointers, which
+  // tell whether the object whose callback slot is null was even initialized.
+#if !defined(REX_CONFIG_SKIP_LR)
+  if (REXCVAR_GET(invalid_call_nonfatal)) {
+    REXLOG_ERROR(
+        "SKIP: call to unregistered function at guest address 0x{:08X} "
+        "(caller lr=0x{:08X}, r3=0x{:08X} r4=0x{:08X} r5=0x{:08X})",
+        ctx.last_indirect_target, uint32_t(ctx.lr), uint32_t(ctx.r3.u32),
+        uint32_t(ctx.r4.u32), uint32_t(ctx.r5.u32));
+    return;
+  }
+  REX_FATAL(
+      "Call to invalid or unregistered function at guest address 0x{:08X} "
+      "(caller lr=0x{:08X}, r3=0x{:08X} r4=0x{:08X} r5=0x{:08X})",
+      ctx.last_indirect_target, uint32_t(ctx.lr), uint32_t(ctx.r3.u32),
+      uint32_t(ctx.r4.u32), uint32_t(ctx.r5.u32));
+#else
   REX_FATAL("Call to invalid or unregistered function at guest address 0x{:08X}",
             ctx.last_indirect_target);
+#endif
 }
 
 PPCFunc* ResolveIndirectFunction(uint32_t guest_address) {

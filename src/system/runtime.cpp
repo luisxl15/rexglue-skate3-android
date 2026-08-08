@@ -32,6 +32,9 @@
 REXCVAR_DEFINE_STRING(game_data_root, "", "Runtime", "Override game data path");
 REXCVAR_DEFINE_STRING(user_data_root, "", "Runtime", "Override user data path");
 REXCVAR_DEFINE_STRING(update_data_root, "", "Runtime", "Override update data path");
+REXCVAR_DEFINE_BOOL(mount_cache_device, false, "Runtime",
+                    "Mount real writable cache:/cache1: devices instead of letting them fail "
+                    "(needed by titles that stream world data through the HDD cache)");
 REXCVAR_DEFINE_STRING(cache_path, "", "Runtime", "Override shader cache path");
 
 namespace rex {
@@ -315,6 +318,41 @@ bool Runtime::SetupVfs() {
     }
   }
 
+  // Real writable cache partitions, opt-in via mount_cache_device.
+  //
+  // The default below is to leave cache: unmounted so it fails cleanly, which
+  // works for titles that only touch the cache opportunistically. Titles that
+  // stream world data through it never manage to build the cache and end up
+  // with no collision/geometry (the player falls through the world).
+  //
+  // Registered BEFORE the NullDevice on purpose: the VFS resolves devices in
+  // registration order, and the NullDevice is mounted on \Device\Harddisk0.
+  if (REXCVAR_GET(mount_cache_device)) {
+    auto cache_base = cache_root_.empty() ? (user_data_root_ / "cache") : cache_root_;
+    struct CacheMount { const char* device; const char* link; const char* dir; };
+    const CacheMount kCaches[] = {
+        {"\\Device\\Harddisk0\\CachePartition0", "cache:", "cache0"},
+        {"\\Device\\Harddisk0\\CachePartition1", "cache1:", "cache1"},
+    };
+    for (const auto& c : kCaches) {
+      auto dir = std::filesystem::absolute(cache_base / c.dir);
+      std::error_code ec;
+      std::filesystem::create_directories(dir, ec);
+      if (ec) {
+        REXSYS_ERROR("Runtime::SetupVfs: could not create cache dir {}: {}", dir.string(),
+                     ec.message());
+        continue;
+      }
+      auto dev = std::make_unique<rex::filesystem::HostPathDevice>(c.device, dir, false);
+      if (dev->Initialize() && file_system_->RegisterDevice(std::move(dev))) {
+        file_system_->RegisterSymbolicLink(c.link, c.device);
+        REXSYS_INFO("  Mounted {} at {}", dir.string(), c.link);
+      } else {
+        REXSYS_ERROR("Runtime::SetupVfs: failed to mount cache device {}", c.link);
+      }
+    }
+  }
+
   // Setup NullDevice for raw HDD partition accesses
   // Cache/STFC code baked into games tries reading/writing to these
   // Using a NullDevice returns success to all IO requests, allowing games
@@ -328,10 +366,6 @@ bool Runtime::SetupVfs() {
     file_system_->RegisterDevice(std::move(null_device));
     REXSYS_DEBUG("  Registered NullDevice for \\Device\\Harddisk0\\{{Partition0,Cache0,Cache1}}");
   }
-
-  // NOTE: Do NOT register a device for cache: paths
-  // Games handle "device not found" gracefully but don't handle actual device
-  // errors (like NAME_COLLISION) well. Let cache: fail cleanly.
 
   return true;
 }

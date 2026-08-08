@@ -15,7 +15,15 @@
 #include <cstddef>
 
 #if REX_PLATFORM_LINUX
+#if REX_PLATFORM_ANDROID
+// Bionic defines the ucontext_t type but omits getcontext/makecontext/
+// swapcontext, so the POSIX fiber backend uses the vendored libucontext
+// (aarch64 assembly). Its context struct is distinct from Bionic's, so the
+// context_ member below must use libucontext's type as well.
+#include <libucontext/libucontext.h>
+#else
 #include <ucontext.h>
+#endif
 #include <cstdint>
 #include <vector>
 #elif REX_PLATFORM_MAC
@@ -24,6 +32,14 @@
 #endif
 
 namespace rex::thread {
+
+#if REX_PLATFORM_LINUX
+#if REX_PLATFORM_ANDROID
+using FiberContext = ::libucontext_ucontext_t;
+#else
+using FiberContext = ::ucontext_t;
+#endif
+#endif
 
 /// Host OS fiber primitive.
 /// Each guest fiber gets one Fiber. Switching preserves the entire C++ call
@@ -55,7 +71,7 @@ struct Fiber {
   void* handle_ = nullptr;
   bool is_thread_fiber_ = false;
 #elif REX_PLATFORM_LINUX
-  ucontext_t context_{};
+  FiberContext context_{};
   std::vector<uint8_t> stack_;
   void (*entry_)(void*) = nullptr;
   void* arg_ = nullptr;

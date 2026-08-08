@@ -21,6 +21,19 @@
 #include <cassert>
 #include <ucontext.h>
 
+// Bionic lacks getcontext/makecontext/swapcontext; on Android these route to
+// the vendored libucontext (aarch64 assembly). Everywhere else they are the
+// libc ucontext functions.
+#if REX_PLATFORM_ANDROID
+#define REX_FIBER_GETCONTEXT  ::libucontext_getcontext
+#define REX_FIBER_MAKECONTEXT ::libucontext_makecontext
+#define REX_FIBER_SWAPCONTEXT ::libucontext_swapcontext
+#else
+#define REX_FIBER_GETCONTEXT  ::getcontext
+#define REX_FIBER_MAKECONTEXT ::makecontext
+#define REX_FIBER_SWAPCONTEXT ::swapcontext
+#endif
+
 namespace rex::thread {
 
 thread_local Fiber* Fiber::tls_current_ = nullptr;
@@ -30,7 +43,7 @@ namespace {
 #if REX_PLATFORM_MAC
 ucontext_t* ToContext(void* context) { return static_cast<ucontext_t*>(context); }
 #else
-ucontext_t* ToContext(ucontext_t& context) { return &context; }
+FiberContext* ToContext(FiberContext& context) { return &context; }
 #endif
 
 }  // namespace
@@ -40,7 +53,7 @@ Fiber* Fiber::ConvertCurrentThread() {
 #if REX_PLATFORM_MAC
   f->context_ = new ucontext_t{};
 #endif
-  if (getcontext(ToContext(f->context_)) == -1) {
+  if (REX_FIBER_GETCONTEXT(ToContext(f->context_)) == -1) {
 #if REX_PLATFORM_MAC
     delete ToContext(f->context_);
 #endif
@@ -62,7 +75,7 @@ Fiber* Fiber::Create(size_t stack_size, void (*entry)(void*), void* arg) {
 #endif
 
   auto* context = ToContext(f->context_);
-  if (getcontext(context) == -1) {
+  if (REX_FIBER_GETCONTEXT(context) == -1) {
 #if REX_PLATFORM_MAC
     delete context;
 #endif
@@ -73,7 +86,7 @@ Fiber* Fiber::Create(size_t stack_size, void (*entry)(void*), void* arg) {
   context->uc_stack.ss_size = f->stack_.size();
   context->uc_link = nullptr;
   // Trampoline reads entry_/arg_ from tls_current_ — no pointer splitting needed.
-  makecontext(context, &Fiber::Trampoline, 0);
+  REX_FIBER_MAKECONTEXT(context, &Fiber::Trampoline, 0);
   return f;
 }
 
@@ -86,7 +99,7 @@ Fiber* Fiber::Create(size_t stack_size, void (*entry)(void*), void* arg) {
 void Fiber::SwitchTo(Fiber* target) {
   Fiber* from = tls_current_;
   tls_current_ = target;
-  swapcontext(ToContext(from->context_), ToContext(target->context_));
+  REX_FIBER_SWAPCONTEXT(ToContext(from->context_), ToContext(target->context_));
 }
 
 void Fiber::Destroy() {

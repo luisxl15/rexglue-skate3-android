@@ -56,6 +56,15 @@ target_include_directories(rexruntime PUBLIC
     $<BUILD_INTERFACE:${REXGLUE_ROOT}/include>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
+if(ANDROID)
+    # Public header rex/thread/fiber.h includes <libucontext/libucontext.h> on
+    # Android; consumers of the runtime (e.g. the recompiled game) need its
+    # include path too.
+    target_include_directories(rexruntime PUBLIC
+        $<BUILD_INTERFACE:${REXGLUE_ROOT}/thirdparty/libucontext/include>
+        $<BUILD_INTERFACE:${REXGLUE_ROOT}/thirdparty/libucontext/arch/aarch64/include>
+    )
+endif()
 target_include_directories(rexruntime PRIVATE
     ${REXGLUE_ROOT}/thirdparty
 )

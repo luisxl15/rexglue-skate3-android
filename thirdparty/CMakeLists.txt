@@ -150,6 +150,30 @@ target_compile_definitions(o1heap PRIVATE
     "O1HEAP_CONFIG_HEADER=\"${CMAKE_CURRENT_SOURCE_DIR}/../include/rex/o1heap_config.h\"")
 target_compile_options(o1heap PRIVATE -w)
 
+# libucontext - fiber context switching for Android (Bionic lacks the ucontext
+# functions getcontext/makecontext/swapcontext; this provides them in aarch64
+# assembly). Not built on desktop platforms, which have them in libc.
+if(ANDROID)
+    enable_language(ASM)
+    set(LIBUCONTEXT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/libucontext")
+    add_library(libucontext STATIC
+        ${LIBUCONTEXT_DIR}/arch/aarch64/getcontext.S
+        ${LIBUCONTEXT_DIR}/arch/aarch64/setcontext.S
+        ${LIBUCONTEXT_DIR}/arch/aarch64/swapcontext.S
+        ${LIBUCONTEXT_DIR}/arch/aarch64/makecontext.c
+        ${LIBUCONTEXT_DIR}/arch/aarch64/trampoline.c
+    )
+    target_include_directories(libucontext
+        PUBLIC
+            ${LIBUCONTEXT_DIR}/include
+            ${LIBUCONTEXT_DIR}/arch/aarch64/include
+        PRIVATE
+            ${LIBUCONTEXT_DIR}/arch/aarch64
+            ${LIBUCONTEXT_DIR}/arch/common
+    )
+    target_compile_options(libucontext PRIVATE -w)
+endif()
+
 # xxHash - extremely fast non-cryptographic hash (git submodule)
 set(XXHASH_BUILD_XXHSUM OFF CACHE BOOL "" FORCE)
 add_subdirectory(xxHash/cmake_unofficial)
@@ -280,7 +304,9 @@ set(SDL_TEST OFF CACHE BOOL "" FORCE)
 set(SDL_UNIX_CONSOLE_BUILD ON CACHE BOOL "" FORCE)
 
 # Disable unused subsystems
-if(APPLE)
+if(APPLE OR ANDROID)
+    # Android needs SDL's video backend: it provides the window/ANativeWindow
+    # and the Android_* JNI event glue (touch, key, resize) the runtime links.
     set(SDL_VIDEO ON CACHE BOOL "" FORCE)
 else()
     set(SDL_VIDEO OFF CACHE BOOL "" FORCE)
@@ -312,8 +338,9 @@ set(SDL_DISKAUDIO OFF CACHE BOOL "" FORCE)
 set(SDL_DUMMYAUDIO OFF CACHE BOOL "" FORCE)
 set(SDL_DUMMYVIDEO OFF CACHE BOOL "" FORCE)
 
-# Linux audio backends
-if(UNIX AND NOT APPLE)
+# Linux audio backends (desktop only; Android uses AAudio/OpenSLES via SDL's
+# own Android detection, and has no ALSA/PulseAudio/PipeWire).
+if(UNIX AND NOT APPLE AND NOT ANDROID)
     set(SDL_ALSA              ON  CACHE BOOL "" FORCE)
     set(SDL_ALSA_SHARED       ON  CACHE BOOL "" FORCE)
     set(SDL_PULSEAUDIO        ON  CACHE BOOL "" FORCE)
@@ -585,6 +612,9 @@ target_include_directories(libavutil
 )
 target_compile_definitions(libavutil PRIVATE ${FFMPEG_COMMON_DEFINES})
 target_compile_options(libavutil PRIVATE -w)  # Suppress warnings in third-party code
+# Hidden visibility so the aarch64 NEON asm can reference internal data symbols
+# (ff_cos_* etc.) with PC-relative relocations when linked into a shared object.
+target_compile_options(libavutil PRIVATE -fvisibility=hidden)
 if(WIN32)
     target_link_libraries(libavutil PRIVATE bcrypt)
 endif()
@@ -714,6 +744,9 @@ target_include_directories(libavcodec
 )
 target_compile_definitions(libavcodec PRIVATE ${FFMPEG_COMMON_DEFINES})
 target_compile_options(libavcodec PRIVATE -w)  # Suppress warnings in third-party code
+# See libavutil above: hidden visibility for PC-relative asm data references
+# (ff_cos_* in fft_float.c referenced by fft_neon.S) in the shared-object link.
+target_compile_options(libavcodec PRIVATE -fvisibility=hidden)
 target_link_libraries(libavcodec PUBLIC libavutil)
 if(WIN32)
     target_link_libraries(libavcodec PRIVATE bcrypt)

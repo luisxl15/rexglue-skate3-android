@@ -56,6 +56,7 @@ namespace ui {
 class ConsoleDialog;
 class FpsOverlayDialog;
 class SettingsDialog;
+class TouchControlsOverlayDialog;
 }  // namespace ui
 
 /// Base class for recompiled Xbox 360 applications.
@@ -240,6 +241,14 @@ class ReXApp : public ui::WindowedApp, public ui::WindowListener, public ui::Win
   std::unique_ptr<ui::ConsoleDialog> console_overlay_;
   std::unique_ptr<ui::SettingsDialog> settings_overlay_;
   std::unique_ptr<ui::FpsOverlayDialog> fps_overlay_;
+#if REX_PLATFORM_ANDROID
+  // So existe no Android: o .cpp do overlay so entra no build la (ele inclui
+  // headers do SDL3 direto, que o rexui so tem nas plataformas com backend de
+  // janela SDL). Declarar o membro sem guarda faz o ~ReXApp instanciar
+  // ~unique_ptr<TouchControlsOverlayDialog>, que chama delete no tipo completo
+  // e exige o simbolo do destrutor -> link error no desktop.
+  std::unique_ptr<ui::TouchControlsOverlayDialog> touch_controls_overlay_;
+#endif
   ui::DebugOverlayDialog::FrameStatsProvider frame_stats_provider_;
   std::filesystem::path config_path_;
 };

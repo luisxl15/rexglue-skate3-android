@@ -97,6 +97,27 @@ std::filesystem::path GetExecutableFolder() {
 
 std::filesystem::path GetAppRootFolder() {
   auto folder = GetExecutableFolder();
+#if REX_PLATFORM_ANDROID
+  // /proc/self/exe on Android is the zygote binary (/system/bin/app_process64),
+  // so the executable folder is a read-only system directory the user can never
+  // put files in - the app config (<name>.toml) and the controller mappings
+  // would silently never load. Prefer the public folder that holds the game
+  // data (the only place the user can drop files without root), then the app's
+  // private storage, which main() already chdir'd into.
+  {
+    std::error_code ec;
+    for (const char* candidate :
+         {"/storage/emulated/0/skate3", "/sdcard/skate3"}) {
+      if (std::filesystem::is_directory(candidate, ec)) {
+        return candidate;
+      }
+    }
+    auto cwd = std::filesystem::current_path(ec);
+    if (!ec && !cwd.empty()) {
+      return cwd;
+    }
+  }
+#endif
 #if REX_PLATFORM_MAC
   // <root>/<name>.app/Contents/MacOS/<exe> -> <root>
   if (folder.filename() == "MacOS") {

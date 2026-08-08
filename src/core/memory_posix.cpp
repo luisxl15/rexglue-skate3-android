@@ -19,6 +19,13 @@
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#if defined(__ANDROID__)
+#include <sys/syscall.h>  // __NR_memfd_create
+#include <linux/memfd.h>
+#ifndef __NR_memfd_create
+#define __NR_memfd_create 279  // aarch64 syscall number
+#endif
+#endif
 #include <unistd.h>
 
 #include <rex/math.h>
@@ -29,6 +36,7 @@
 #if REX_PLATFORM_ANDROID
 #include <string.h>
 
+#include <android/log.h>
 #include <dlfcn.h>
 #include <sys/ioctl.h>
 
@@ -366,11 +374,38 @@ bool QueryProtect(void* base_address, size_t& length, PageAccess& access_out) {
 FileMappingHandle CreateFileMappingHandle(const std::filesystem::path& path, size_t length,
                                           PageAccess access, bool commit) {
 #if REX_PLATFORM_ANDROID
-  // TODO(Triang3l): Check if memfd can be used instead on API 30+.
+  // ASharedMemory (ashmem) first: its pages are PURGEABLE, so the kernel can
+  // reclaim the guest region under memory pressure instead of OOM-killing.
+  // memfd is tmpfs-backed and unswappable, and on a 4GB device (a phone with
+  // other apps resident, or an emulator VM) a guest heap that large took the
+  // whole system down with it.
   if (android_ASharedMemory_create_) {
     int sharedmem_fd = android_ASharedMemory_create_(path.c_str(), length);
-    return sharedmem_fd >= 0 ? static_cast<FileMappingHandle>(sharedmem_fd)
-                             : kFileMappingHandleInvalid;
+    if (sharedmem_fd >= 0) {
+      __android_log_print(ANDROID_LOG_INFO, "SK3DBG",
+                          "guest mapping: ASharedMemory (%zu bytes)", length);
+      return static_cast<FileMappingHandle>(sharedmem_fd);
+    }
+    __android_log_print(ANDROID_LOG_WARN, "SK3DBG",
+                        "ASharedMemory_create(%zu) failed: %s", length, strerror(errno));
+  } else {
+    __android_log_print(ANDROID_LOG_WARN, "SK3DBG",
+                        "ASharedMemory unavailable (AndroidInitialize not run?)");
+  }
+  // memfd (Linux 3.17+) as the fallback: ashmem refuses a region this large on
+  // some devices, and there the sparse memfd mapping is the only way to reserve
+  // the ~4.8GB guest address space at all. Called via raw syscall to sidestep
+  // the NDK API-level availability guard.
+  {
+    int memfd = static_cast<int>(syscall(__NR_memfd_create, path.filename().c_str(), 0u));
+    if (memfd >= 0) {
+      if (ftruncate64(memfd, static_cast<off_t>(length)) == 0) {
+        __android_log_print(ANDROID_LOG_INFO, "SK3DBG",
+                            "guest mapping: memfd (%zu bytes)", length);
+        return static_cast<FileMappingHandle>(memfd);
+      }
+      close(memfd);
+    }
   }
 
   // Use /dev/ashmem on API versions below 26, which added ASharedMemory.

@@ -54,7 +54,12 @@ constexpr std::array<std::string_view, 7> kCoreSimpleSettingsCvars = {
 // Optional cvars persisted when the host defines them (HasCvar-gated: app
 // cvars like the native-renderer knobs don't exist in every embedder, and
 // backend/platform cvars don't exist in every build).
-constexpr std::array<std::string_view, 24> kOptionalSimpleSettingsCvars = {
+constexpr std::array<std::string_view, 27> kOptionalSimpleSettingsCvars = {
+    // On-screen touch controls (Android): defined by the touch overlay, so
+    // HasCvar-gated away on builds that never create one.
+    "touch_button_layout",
+    "touch_button_fill",
+    "touch_button_color",
     "skate3_native_render_scene",
     "skate3_native_render_scene_msaa",
     "skate3_native_render_scene_shadows",
@@ -927,6 +932,24 @@ void EnsureSimpleSettingsConfig(const std::filesystem::path& config_path) {
 }
 
 // One setting row (or section header) in the content column.
+// String cvars naming an asset folder ("xbox", "solid", ...) drive the touch
+// button rows, but kEnum rows step an index - these convert between the two.
+int TouchOptionIndex(const char* cvar, std::initializer_list<const char*> values,
+                     int fallback) {
+  if (!HasCvar(cvar)) {
+    return fallback;
+  }
+  const std::string current = rex::cvar::GetFlagByName(cvar);
+  int i = 0;
+  for (const char* value : values) {
+    if (current == value) {
+      return i;
+    }
+    ++i;
+  }
+  return fallback;
+}
+
 struct SimpleSettingsDialog::RowSpec {
   enum Kind { kHeader, kEnum, kSlider, kAction, kText };
   Kind kind = kEnum;
@@ -1058,6 +1081,10 @@ void SimpleSettingsDialog::LoadSettingsFromCvars() {
   chord_custom_.clear();
   chord_index_ = HasCvar("menu_chord") ? MenuChordIndexFromCvar(&chord_custom_) : 0;
   input_backend_index_ = HasInputBackendChoice() ? InputBackendIndexFromCvar() : 0;
+  touch_layout_index_ = TouchOptionIndex("touch_button_layout", {"xbox", "ps"}, 0);
+  touch_fill_index_ =
+      TouchOptionIndex("touch_button_fill", {"outline", "solid", "full"}, 1);
+  touch_color_index_ = TouchOptionIndex("touch_button_color", {"black", "white"}, 1);
 }
 
 bool SimpleSettingsDialog::HasSettingsChanges() const {
@@ -1915,6 +1942,56 @@ void SimpleSettingsDialog::BuildRows(std::vector<RowSpec>& rows, int category) {
           SaveSimpleSettingsConfig(config_path_);
         };
         rows.push_back(std::move(row));
+      }
+      // On-screen touch buttons: only exists where a touch overlay defined the
+      // cvars (Android), so the whole block disappears elsewhere.
+      if (HasCvar("touch_button_layout")) {
+        {
+          RowSpec row;
+          row.kind = RowSpec::kHeader;
+          row.label = "On-Screen Buttons";
+          rows.push_back(std::move(row));
+        }
+        // Each row writes the cvar the overlay watches; it reloads its glyphs
+        // on the next frame, so the change is visible while the menu is open.
+        auto add = [this, &rows](const char* label, const char* desc,
+                                 std::vector<std::string> options,
+                                 std::vector<const char*> values, int* index,
+                                 const char* cvar, int default_index) {
+          RowSpec row;
+          row.kind = RowSpec::kEnum;
+          row.label = label;
+          row.desc = desc;
+          row.options = std::move(options);
+          row.index = index;
+          row.on_enum_change = [this, values, cvar](int value) {
+            if (value >= 0 && value < int(values.size())) {
+              rex::cvar::SetFlagByName(cvar, values[size_t(value)]);
+              SaveSimpleSettingsConfig(config_path_);
+            }
+          };
+          row.reset = [this, values, cvar, index, default_index] {
+            *index = default_index;
+            rex::cvar::SetFlagByName(cvar, values[size_t(default_index)]);
+            SaveSimpleSettingsConfig(config_path_);
+          };
+          rows.push_back(std::move(row));
+        };
+        add("Button Icons",
+            "Which controller the on-screen buttons are drawn as. Applies "
+            "immediately.",
+            {"Xbox", "PlayStation"}, {"xbox", "ps"}, &touch_layout_index_,
+            "touch_button_layout", 0);
+        add("Button Style",
+            "Outline draws only the shape, Solid fills the glyph, Full fills the "
+            "whole button. Applies immediately.",
+            {"Outline", "Solid", "Full"}, {"outline", "solid", "full"},
+            &touch_fill_index_, "touch_button_fill", 1);
+        add("Button Colour",
+            "Colour of the on-screen buttons. White reads better over dark "
+            "scenes, black over bright ones. Applies immediately.",
+            {"Black", "White"}, {"black", "white"}, &touch_color_index_,
+            "touch_button_color", 1);
       }
       break;
     }

@@ -13,6 +13,11 @@
 #include <rex/logging.h>
 #include <rex/platform.h>
 #include <rex/ui/surface_sdl.h>
+#if defined(__ANDROID__)
+#include <rex/ui/surface_android.h>
+#include <SDL3/SDL_properties.h>
+#include <SDL3/SDL_video.h>
+#endif
 #include <rex/ui/virtual_key.h>
 
 #include <SDL3/SDL_hints.h>
@@ -437,6 +442,9 @@ bool SDLWindow::OpenImpl() {
 
   WindowMap().emplace(SDL_GetWindowID(window_), this);
 
+#if !defined(__ANDROID__)
+  // Metal view is the macOS/MoltenVK presentation path. Android presents to the
+  // ANativeWindow directly via a Vulkan Android surface (see CreateSurfaceImpl).
   metal_view_ = SDL_Metal_CreateView(window_);
   if (!metal_view_) {
     REXLOG_ERROR("SDLWindow: Failed to create Metal view: {}", SDL_GetError());
@@ -455,6 +463,7 @@ bool SDLWindow::OpenImpl() {
     window_ = nullptr;
     return false;
   }
+#endif  // !defined(__ANDROID__)
 
   dpi_ = QueryDpi();
   SDL_ShowWindow(window_);
@@ -541,10 +550,23 @@ void SDLWindow::FocusImpl() {
 }
 
 std::unique_ptr<Surface> SDLWindow::CreateSurfaceImpl(Surface::TypeFlags allowed_types) {
+#if defined(__ANDROID__)
+  // Present to the ANativeWindow backing the SDL window via a Vulkan Android
+  // surface (vkCreateAndroidSurfaceKHR in the presenter).
+  if (allowed_types & Surface::kTypeFlag_AndroidNativeWindow) {
+    if (auto* native = static_cast<ANativeWindow*>(
+            SDL_GetPointerProperty(SDL_GetWindowProperties(window_),
+                                   SDL_PROP_WINDOW_ANDROID_WINDOW_POINTER, nullptr))) {
+      return std::make_unique<AndroidNativeWindowSurface>(native);
+    }
+  }
+  return nullptr;
+#else
   if (!(allowed_types & Surface::kTypeFlag_SDLMetalView)) {
     return nullptr;
   }
   return std::make_unique<SDLMetalViewSurface>(window_, metal_view_, metal_layer_);
+#endif
 }
 
 void SDLWindow::RequestPaintImpl() {
